@@ -45,14 +45,17 @@ public sealed class Player : Entity
         }
     }
 
-    public void GainXp(int amount)
+    public bool GainXp(int amount)
     {
         Xp += amount;
+        bool leveled = false;
         while (Xp >= XpToNext)
         {
             Xp -= XpToNext;
             LevelUp();
+            leveled = true;
         }
+        return leveled;
     }
 
     private void LevelUp()

@@ -69,12 +69,14 @@ public sealed class Map
         var candidateRooms = rooms.Skip(1).ToList();
         if (candidateRooms.Count == 0) candidateRooms = rooms;
 
-        for (int i = 0; i < enemyCount && candidateRooms.Count > 0; i++)
+        for (int placed = 0, tries = 0; placed < enemyCount && candidateRooms.Count > 0 && tries < enemyCount * 4; tries++)
         {
             var room = candidateRooms[rng.Next(candidateRooms.Count)];
             int ex = rng.Next(room.X + 1, room.X + room.W - 1);
             int ey = rng.Next(room.Y + 1, room.Y + room.H - 1);
+            if (map.Enemies.All.Any(e => e.X == ex && e.Y == ey)) continue;
             map.Enemies.Add(EnemyFactory.Random(ex, ey, floorNumber, rng));
+            placed++;
         }
 
         if (floorNumber == 3)
@@ -96,7 +98,13 @@ public sealed class Map
         return map;
     }
 
-    public List<(int X, int Y)> _itemPositions = new();
+    private readonly List<(int X, int Y)> _itemPositions = new();
+
+    public void DropItem(Item item, int x, int y)
+    {
+        Items.Add(item);
+        _itemPositions.Add((x, y));
+    }
 
     public Item? TakeItemAt(int x, int y)
     {

@@ -30,6 +30,11 @@ public sealed class DungeonGame : IDisposable
     private bool _quit;
     private bool _bossDefeated;
 
+    private readonly HashSet<(int, int)> _visible  = new();
+    private readonly HashSet<(int, int)> _explored = new();
+
+    private readonly Dictionary<int, (Map Map, int PlayerX, int PlayerY, HashSet<(int, int)> Explored)> _floorCache = new();
+
     public DungeonGame()
     {
         _sdl = new Sdl(new SdlContext());
@@ -90,7 +95,7 @@ public sealed class DungeonGame : IDisposable
                     UpdateMenu(action);
                     break;
                 case GamePhase.Playing:
-                    await UpdatePlayingAsync(action);
+                    UpdatePlaying(action);
                     break;
                 case GamePhase.Inventory:
                     UpdateInventory(action);
@@ -105,11 +110,11 @@ public sealed class DungeonGame : IDisposable
             _renderer.Clear(10, 10, 15);
             switch (_phase)
             {
-                case GamePhase.MainMenu: RenderMenu(); break;
-                case GamePhase.Playing:  RenderPlaying(); break;
+                case GamePhase.MainMenu:  RenderMenu(); break;
+                case GamePhase.Playing:   RenderPlaying(); break;
                 case GamePhase.Inventory: RenderPlaying(); RenderInventoryOverlay(); break;
-                case GamePhase.GameOver: RenderGameOver(); break;
-                case GamePhase.Victory:  RenderVictory(); break;
+                case GamePhase.GameOver:  RenderGameOver(); break;
+                case GamePhase.Victory:   RenderVictory(); break;
             }
             _renderer.Present();
         }
@@ -126,70 +131,61 @@ public sealed class DungeonGame : IDisposable
         _floor = 1;
         _score = 0;
         _bossDefeated = false;
+        _floorCache.Clear();
+        _visible.Clear();
+        _explored.Clear();
         _map = Map.Generate(_floor, out int sx, out int sy, _rng);
         _player = new Player(sx, sy);
+        ComputeVisibility();
         _lastMessage = "You descend into the dungeon...";
         _phase = GamePhase.Playing;
     }
 
-    private void RenderMenu()
-    {
-        int cx = WinW / 2;
-        DrawCentered("THE ADVENTURE", cx, 120, 255, 200, 50, 3);
-        DrawCentered("DUNGEON ROGUELITE", cx, 160, 200, 160, 40, 2);
-        DrawCentered("PRESS ENTER TO START", cx, 240, 200, 200, 200, 2);
-        DrawCentered("WASD/ARROWS  MOVE", cx, 310, 160, 160, 160, 2);
-        DrawCentered("G  PICK UP ITEM", cx, 332, 160, 160, 160, 2);
-        DrawCentered("1-8  USE ITEM", cx, 354, 160, 160, 160, 2);
-        DrawCentered(". / COMMA  STAIRS", cx, 376, 160, 160, 160, 2);
-        DrawCentered("I  INVENTORY", cx, 398, 160, 160, 160, 2);
-
-        DrawCentered("HIGH SCORES", cx, 450, 255, 215, 80, 2);
-        var top = _scores.TopScores.Take(5).ToList();
-        for (int i = 0; i < top.Count; i++)
-        {
-            var e = top[i];
-            DrawCentered($"{i + 1}. {e.Name}  {e.Score}  FL{e.Floor}", cx, 476 + i * 22, 180, 220, 180, 2);
-        }
-        if (top.Count == 0)
-            DrawCentered("NO SCORES YET", cx, 476, 120, 120, 120, 2);
-    }
-
-    private async Task UpdatePlayingAsync(PlayerAction action)
+    private void UpdatePlaying(PlayerAction action)
     {
         if (action == PlayerAction.None) return;
-
         if (action == PlayerAction.ToggleInventory) { _phase = GamePhase.Inventory; return; }
         if (action == PlayerAction.Cancel) { _phase = GamePhase.MainMenu; return; }
 
         bool playerActed = false;
 
-        switch (action)
+        try
         {
-            case PlayerAction.MoveUp:    playerActed = TryMove(0, -1); break;
-            case PlayerAction.MoveDown:  playerActed = TryMove(0,  1); break;
-            case PlayerAction.MoveLeft:  playerActed = TryMove(-1, 0); break;
-            case PlayerAction.MoveRight: playerActed = TryMove( 1, 0); break;
-            case PlayerAction.PickUp:    playerActed = TryPickUp(); break;
-            case PlayerAction.Descend:   playerActed = TryDescend(); break;
-            case PlayerAction.Ascend:    playerActed = TryAscend(); break;
-            case PlayerAction.UseItem1:  playerActed = TryUseItem(0); break;
-            case PlayerAction.UseItem2:  playerActed = TryUseItem(1); break;
-            case PlayerAction.UseItem3:  playerActed = TryUseItem(2); break;
-            case PlayerAction.UseItem4:  playerActed = TryUseItem(3); break;
-            case PlayerAction.UseItem5:  playerActed = TryUseItem(4); break;
-            case PlayerAction.UseItem6:  playerActed = TryUseItem(5); break;
-            case PlayerAction.UseItem7:  playerActed = TryUseItem(6); break;
-            case PlayerAction.UseItem8:  playerActed = TryUseItem(7); break;
-        }
+            switch (action)
+            {
+                case PlayerAction.MoveUp:    playerActed = TryMove(0, -1); break;
+                case PlayerAction.MoveDown:  playerActed = TryMove(0,  1); break;
+                case PlayerAction.MoveLeft:  playerActed = TryMove(-1, 0); break;
+                case PlayerAction.MoveRight: playerActed = TryMove( 1, 0); break;
+                case PlayerAction.PickUp:    playerActed = TryPickUp(); break;
+                case PlayerAction.Descend:   playerActed = TryDescend(); break;
+                case PlayerAction.Ascend:    playerActed = TryAscend(); break;
+                case PlayerAction.UseItem1:  playerActed = TryUseItem(0); break;
+                case PlayerAction.UseItem2:  playerActed = TryUseItem(1); break;
+                case PlayerAction.UseItem3:  playerActed = TryUseItem(2); break;
+                case PlayerAction.UseItem4:  playerActed = TryUseItem(3); break;
+                case PlayerAction.UseItem5:  playerActed = TryUseItem(4); break;
+                case PlayerAction.UseItem6:  playerActed = TryUseItem(5); break;
+                case PlayerAction.UseItem7:  playerActed = TryUseItem(6); break;
+                case PlayerAction.UseItem8:  playerActed = TryUseItem(7); break;
+            }
 
-        if (playerActed)
+            if (playerActed)
+            {
+                RunEnemyTurns();
+                _map.Enemies.RemoveDead();
+                CheckWinLose();
+            }
+        }
+        catch (GameOverException ex)
         {
-            RunEnemyTurns();
-            _map.Enemies.RemoveDead();
-            CheckWinLose();
-            if (_phase == GamePhase.GameOver)
-                await RecordScoreAsync();
+            _score = ex.FinalScore;
+            _phase = GamePhase.GameOver;
+            RecordScore();
+        }
+        catch (InvalidMoveException)
+        {
+            _lastMessage = "Blocked.";
         }
     }
 
@@ -205,22 +201,25 @@ public sealed class DungeonGame : IDisposable
             if (!target.IsAlive)
             {
                 _score += target.XpReward;
-                _player.GainXp(target.XpReward);
+                bool leveled = _player.GainXp(target.XpReward);
                 if (target.Kind == EnemyKind.Boss) _bossDefeated = true;
                 _lastMessage += $" {target.DisplayName} defeated!";
+                if (leveled) _lastMessage += $" LEVEL UP! (LVL {_player.Level})";
             }
             return true;
         }
 
+        if (!_map.InBounds(nx, ny)) throw new InvalidMoveException(nx, ny);
         if (!_map.IsWalkable(nx, ny)) { _lastMessage = "Blocked."; return false; }
 
         _player.X = nx;
         _player.Y = ny;
+        ComputeVisibility();
 
-        if (_map[nx, ny] == TileType.StairsDown) _lastMessage = "Press '.' to descend.";
-        else if (_map[nx, ny] == TileType.StairsUp) _lastMessage = "Press ',' to ascend.";
-        else if (_map.HasItemAt(nx, ny)) _lastMessage = "Press 'G' to pick up.";
-        else _lastMessage = string.Empty;
+        if (_map[nx, ny] == TileType.StairsDown)      _lastMessage = "Press '.' to descend.";
+        else if (_map[nx, ny] == TileType.StairsUp)   _lastMessage = "Press ',' to ascend.";
+        else if (_map.HasItemAt(nx, ny))               _lastMessage = "Press 'G' to pick up.";
+        else                                           _lastMessage = string.Empty;
 
         return true;
     }
@@ -230,8 +229,7 @@ public sealed class DungeonGame : IDisposable
         var item = _map.TakeItemAt(_player.X, _player.Y);
         if (item == null) { _lastMessage = "Nothing here."; return false; }
         if (_player.TryPickUp(item)) { _lastMessage = $"Picked up {item.Name}."; return true; }
-        _map.Items.Add(item);
-        _map._itemPositions.Add((_player.X, _player.Y));
+        _map.DropItem(item, _player.X, _player.Y);
         _lastMessage = "Inventory full!";
         return false;
     }
@@ -241,10 +239,27 @@ public sealed class DungeonGame : IDisposable
         if (_map[_player.X, _player.Y] != TileType.StairsDown)
         { _lastMessage = "No stairs here."; return false; }
         if (_floor >= 3) { _lastMessage = "Deepest floor."; return false; }
+
+        _floorCache[_floor] = (_map, _player.X, _player.Y, new HashSet<(int, int)>(_explored));
         _floor++;
         _score += _floor * 50;
-        _map = Map.Generate(_floor, out int sx, out int sy, _rng);
-        _player.X = sx; _player.Y = sy;
+        _explored.Clear();
+        _visible.Clear();
+
+        if (_floorCache.TryGetValue(_floor, out var saved))
+        {
+            _map = saved.Map;
+            _player.X = saved.PlayerX;
+            _player.Y = saved.PlayerY;
+            _explored.UnionWith(saved.Explored);
+        }
+        else
+        {
+            _map = Map.Generate(_floor, out int sx, out int sy, _rng);
+            _player.X = sx; _player.Y = sy;
+        }
+
+        ComputeVisibility();
         _lastMessage = $"You descend to floor {_floor}!";
         return true;
     }
@@ -254,9 +269,26 @@ public sealed class DungeonGame : IDisposable
         if (_map[_player.X, _player.Y] != TileType.StairsUp)
         { _lastMessage = "No stairs here."; return false; }
         if (_floor <= 1) { _lastMessage = "Already at top."; return false; }
+
+        _floorCache[_floor] = (_map, _player.X, _player.Y, new HashSet<(int, int)>(_explored));
         _floor--;
-        _map = Map.Generate(_floor, out int sx, out int sy, _rng);
-        _player.X = sx; _player.Y = sy;
+        _explored.Clear();
+        _visible.Clear();
+
+        if (_floorCache.TryGetValue(_floor, out var saved))
+        {
+            _map = saved.Map;
+            _player.X = saved.PlayerX;
+            _player.Y = saved.PlayerY;
+            _explored.UnionWith(saved.Explored);
+        }
+        else
+        {
+            _map = Map.Generate(_floor, out int sx, out int sy, _rng);
+            _player.X = sx; _player.Y = sy;
+        }
+
+        ComputeVisibility();
         _lastMessage = $"You ascend to floor {_floor}.";
         return true;
     }
@@ -279,12 +311,12 @@ public sealed class DungeonGame : IDisposable
             if (enemy.DistanceTo(_player) == 1)
             {
                 var result = CombatSystem.EnemyAttacks(enemy, _player, _rng);
-                if (string.IsNullOrEmpty(_lastMessage) || _lastMessage == string.Empty)
+                if (string.IsNullOrEmpty(_lastMessage))
                     _lastMessage = result.Message;
             }
             else
             {
-                var (dx, dy) = enemy.GetMoveToward(_player, _rng);
+                var (dx, dy) = enemy.GetMoveToward(_player, _map, _rng);
                 int nx = enemy.X + dx, ny = enemy.Y + dy;
                 bool occupied = _map.Enemies.Alive.Any(e => e != enemy && e.X == nx && e.Y == ny)
                              || (_player.X == nx && _player.Y == ny);
@@ -299,14 +331,19 @@ public sealed class DungeonGame : IDisposable
 
     private void CheckWinLose()
     {
-        if (!_player.IsAlive) { _phase = GamePhase.GameOver; return; }
-        if (_bossDefeated)    { _phase = GamePhase.Victory;  _score += 500; }
+        if (!_player.IsAlive) throw new GameOverException(_score);
+        if (_bossDefeated)
+        {
+            _score += 500;
+            _phase = GamePhase.Victory;
+            RecordScore();
+        }
     }
 
-    private async Task RecordScoreAsync()
+    private void RecordScore()
     {
         var entry = new HighScoreEntry("HERO", _score, _floor, DateTime.Now.ToString("yyyy-MM-dd"));
-        await _scores.AddAsync(entry);
+        _scores.AddEntry(entry);
     }
 
     private void UpdateInventory(PlayerAction action)
@@ -332,6 +369,40 @@ public sealed class DungeonGame : IDisposable
         _phase = GamePhase.Playing;
     }
 
+    private void ComputeVisibility()
+    {
+        const int MaxDist = 7;
+        _visible.Clear();
+        var visited = new HashSet<(int, int)>();
+        var queue   = new Queue<(int x, int y, int dist)>();
+        queue.Enqueue((_player.X, _player.Y, 0));
+        visited.Add((_player.X, _player.Y));
+
+        while (queue.Count > 0)
+        {
+            var (x, y, dist) = queue.Dequeue();
+            _visible.Add((x, y));
+            _explored.Add((x, y));
+
+            if (dist >= MaxDist || _map[x, y] == TileType.Wall) continue;
+
+            foreach (var (nx, ny) in Cardinals(x, y))
+            {
+                if (!_map.InBounds(nx, ny) || visited.Contains((nx, ny))) continue;
+                visited.Add((nx, ny));
+                queue.Enqueue((nx, ny, dist + 1));
+            }
+        }
+    }
+
+    private static IEnumerable<(int, int)> Cardinals(int x, int y)
+    {
+        yield return (x - 1, y);
+        yield return (x + 1, y);
+        yield return (x, y - 1);
+        yield return (x, y + 1);
+    }
+
     private void RenderPlaying()
     {
         int vpX = Math.Clamp(_player.X - MapCols / 2, 0, Map.Width  - MapCols);
@@ -343,9 +414,26 @@ public sealed class DungeonGame : IDisposable
             {
                 int mx = vpX + tx, my = vpY + ty;
                 int px = tx * TileSize, py = ty * TileSize;
-                TileColor(_map[mx, my], out byte r, out byte g, out byte b);
-                _renderer.FillRect(px, py, TileSize, TileSize, r, g, b);
 
+                bool isVisible  = _visible.Contains((mx, my));
+                bool isExplored = _explored.Contains((mx, my));
+
+                if (!isExplored)
+                {
+                    _renderer.FillRect(px, py, TileSize, TileSize, 0, 0, 0);
+                    continue;
+                }
+
+                TileColor(_map[mx, my], out byte r, out byte g, out byte b);
+
+                if (!isVisible)
+                {
+                    r = (byte)(r / 3);
+                    g = (byte)(g / 3);
+                    b = (byte)(b / 3);
+                }
+
+                _renderer.FillRect(px, py, TileSize, TileSize, r, g, b);
                 if (_map[mx, my] != TileType.Wall)
                     _renderer.DrawRect(px, py, TileSize, TileSize, 30, 30, 35);
             }
@@ -353,6 +441,7 @@ public sealed class DungeonGame : IDisposable
 
         foreach (var (_, ix, iy) in _map.AllItems)
         {
+            if (!_visible.Contains((ix, iy))) continue;
             int tx2 = ix - vpX, ty2 = iy - vpY;
             if (tx2 < 0 || tx2 >= MapCols || ty2 < 0 || ty2 >= MapRows) continue;
             _renderer.FillRect(tx2 * TileSize + 6, ty2 * TileSize + 6, TileSize - 12, TileSize - 12, 255, 215, 0);
@@ -360,6 +449,7 @@ public sealed class DungeonGame : IDisposable
 
         foreach (var enemy in _map.Enemies.Alive)
         {
+            if (!_visible.Contains((enemy.X, enemy.Y))) continue;
             int tx2 = enemy.X - vpX, ty2 = enemy.Y - vpY;
             if (tx2 < 0 || tx2 >= MapCols || ty2 < 0 || ty2 >= MapRows) continue;
             EnemyColor(enemy.Kind, out byte er, out byte eg, out byte eb);
@@ -418,6 +508,29 @@ public sealed class DungeonGame : IDisposable
         _renderer.FillRect(10, hpBarY, 300, 12, 60, 20, 20);
         _renderer.FillRect(10, hpBarY, hpBarW, 12, (byte)Math.Min(255, 50 + hpBarW / 2), 200, 50);
         _renderer.DrawRect(10, hpBarY, 300, 12, 120, 120, 140);
+    }
+
+    private void RenderMenu()
+    {
+        int cx = WinW / 2;
+        DrawCentered("THE ADVENTURE", cx, 120, 255, 200, 50, 3);
+        DrawCentered("DUNGEON ROGUELITE", cx, 160, 200, 160, 40, 2);
+        DrawCentered("PRESS ENTER TO START", cx, 240, 200, 200, 200, 2);
+        DrawCentered("WASD/ARROWS  MOVE", cx, 310, 160, 160, 160, 2);
+        DrawCentered("G  PICK UP ITEM", cx, 332, 160, 160, 160, 2);
+        DrawCentered("1-8  USE ITEM", cx, 354, 160, 160, 160, 2);
+        DrawCentered(". / COMMA  STAIRS", cx, 376, 160, 160, 160, 2);
+        DrawCentered("I  INVENTORY", cx, 398, 160, 160, 160, 2);
+
+        DrawCentered("HIGH SCORES", cx, 450, 255, 215, 80, 2);
+        var top = _scores.TopScores.Take(5).ToList();
+        for (int i = 0; i < top.Count; i++)
+        {
+            var e = top[i];
+            DrawCentered($"{i + 1}. {e.Name}  {e.Score}  FL{e.Floor}", cx, 476 + i * 22, 180, 220, 180, 2);
+        }
+        if (top.Count == 0)
+            DrawCentered("NO SCORES YET", cx, 476, 120, 120, 120, 2);
     }
 
     private void RenderInventoryOverlay()

@@ -16,22 +16,57 @@ public abstract class Enemy : Entity
         XpReward = xp;
     }
 
-    public (int dx, int dy) GetMoveToward(Player player, Random rng)
+    public (int dx, int dy) GetMoveToward(Player player, Map map, Random rng)
     {
         int dist = DistanceTo(player);
 
-        if (dist > 8)
+        if (dist > 12)
         {
             int dir = rng.Next(4);
             return dir switch { 0 => (0, -1), 1 => (0, 1), 2 => (-1, 0), _ => (1, 0) };
         }
 
-        int dx = Math.Sign(player.X - X);
-        int dy = Math.Sign(player.Y - Y);
+        var start = (X, Y);
+        var goal  = (player.X, player.Y);
+        if (start == goal) return (0, 0);
 
-        if (Math.Abs(player.X - X) >= Math.Abs(player.Y - Y))
-            return (dx, 0);
-        return (0, dy);
+        var parent  = new Dictionary<(int, int), (int, int)> { [start] = start };
+        var queue   = new Queue<(int, int)>();
+        queue.Enqueue(start);
+
+        while (queue.Count > 0)
+        {
+            var (cx, cy) = queue.Dequeue();
+            if ((cx, cy) == goal) break;
+
+            foreach (var nb in CardinalNeighbors(cx, cy))
+            {
+                if (parent.ContainsKey(nb)) continue;
+                if (!map.IsWalkable(nb.Item1, nb.Item2) && nb != goal) continue;
+                parent[nb] = (cx, cy);
+                queue.Enqueue(nb);
+            }
+        }
+
+        if (!parent.ContainsKey(goal))
+        {
+            int dir = rng.Next(4);
+            return dir switch { 0 => (0, -1), 1 => (0, 1), 2 => (-1, 0), _ => (1, 0) };
+        }
+
+        var step = goal;
+        while (parent[step] != start)
+            step = parent[step];
+
+        return (step.Item1 - X, step.Item2 - Y);
+    }
+
+    private static IEnumerable<(int, int)> CardinalNeighbors(int x, int y)
+    {
+        yield return (x - 1, y);
+        yield return (x + 1, y);
+        yield return (x, y - 1);
+        yield return (x, y + 1);
     }
 }
 
