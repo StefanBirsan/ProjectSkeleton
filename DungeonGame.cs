@@ -466,6 +466,70 @@ public sealed class DungeonGame : IDisposable
         }
 
         RenderHud(MapRows * TileSize);
+        RenderMinimap();
+    }
+
+    private void RenderMinimap()
+    {
+        const int TileW = 3, TileH = 3;
+        int mmW = Map.Width  * TileW;
+        int mmH = Map.Height * TileH;
+        int mmX = WinW - mmW - 4;
+        int mmY = WinH - mmH - 4;
+
+        _renderer.FillRect(mmX - 1, mmY - 1, mmW + 2, mmH + 2, 5, 5, 10);
+        _renderer.DrawRect(mmX - 1, mmY - 1, mmW + 2, mmH + 2, 70, 70, 100);
+
+        for (int y = 0; y < Map.Height; y++)
+        {
+            for (int x = 0; x < Map.Width; x++)
+            {
+                if (!_explored.Contains((x, y))) continue;
+
+                bool vis = _visible.Contains((x, y));
+                byte r, g, b;
+
+                switch (_map[x, y])
+                {
+                    case TileType.Floor:
+                        r = vis ? (byte)90  : (byte)45;
+                        g = vis ? (byte)80  : (byte)40;
+                        b = vis ? (byte)70  : (byte)35;
+                        break;
+                    case TileType.StairsDown:
+                        r = vis ? (byte)60  : (byte)30;
+                        g = vis ? (byte)160 : (byte)80;
+                        b = vis ? (byte)60  : (byte)30;
+                        break;
+                    case TileType.StairsUp:
+                        r = vis ? (byte)60  : (byte)30;
+                        g = vis ? (byte)60  : (byte)30;
+                        b = vis ? (byte)160 : (byte)80;
+                        break;
+                    default:
+                        r = vis ? (byte)45 : (byte)22;
+                        g = vis ? (byte)40 : (byte)20;
+                        b = vis ? (byte)38 : (byte)18;
+                        break;
+                }
+
+                _renderer.FillRect(mmX + x * TileW, mmY + y * TileH, TileW, TileH, r, g, b);
+            }
+        }
+
+        foreach (var (_, ix, iy) in _map.AllItems)
+        {
+            if (!_visible.Contains((ix, iy))) continue;
+            _renderer.FillRect(mmX + ix * TileW, mmY + iy * TileH, TileW, TileH, 255, 215, 0);
+        }
+
+        foreach (var enemy in _map.Enemies.Alive)
+        {
+            if (!_visible.Contains((enemy.X, enemy.Y))) continue;
+            _renderer.FillRect(mmX + enemy.X * TileW, mmY + enemy.Y * TileH, TileW, TileH, 220, 50, 50);
+        }
+
+        _renderer.FillRect(mmX + _player.X * TileW, mmY + _player.Y * TileH, TileW, TileH, 80, 160, 255);
     }
 
     private void RenderHud(int hudY)
@@ -495,9 +559,13 @@ public sealed class DungeonGame : IDisposable
 
         if (!string.IsNullOrEmpty(_lastMessage))
         {
-            int msgY = hudY + 80;
-            _renderer.FillRect(0, msgY, WinW, 22, 10, 10, 20);
-            _renderer.DrawText(_lastMessage, 10, msgY + 3, 220, 220, 100, 2);
+            int msgY    = hudY + 80;
+            int msgMaxX = WinW - Map.Width * 3 - 8;
+            _renderer.FillRect(0, msgY, msgMaxX, 22, 10, 10, 20);
+            string msg = _lastMessage;
+            while (msg.Length > 0 && 10 + _renderer.TextWidth(msg, 2) > msgMaxX - 4)
+                msg = msg[..^1];
+            _renderer.DrawText(msg, 10, msgY + 3, 220, 220, 100, 2);
         }
 
         int legY = hudY + 108;
